@@ -111,7 +111,11 @@ def load_preprocessed_data(path):
     return TextDS(data["en"], data["es"])
 
 def fill_sentence_batch(sentences: list[list[str]], max_len: int) -> torch.Tensor:
-    padded = [sentence + [PADDING_TOKEN] * (max_len - len(sentence)) for sentence in sentences]
+    padded = []
+    for sentence in sentences:
+        padding_needed = max_len - len(sentence)
+        for i in range(padding_needed):
+            sentence.append(PADDING_TOKEN)
     return torch.tensor(padded, device=get_device())  # Vectorizado
 
 def create_masks(en_batch, es_batch):

@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
-from data_proccess import TextDS, load_vocab, create_masks, collate_fn, MAX_SEQ_LENGTH, load_data_set, fill_sentence
+from data_proccess import TextDS, load_vocab, create_masks, collate_fn, MAX_SEQ_LENGTH, load_data_set, fill_sentence_batch
 from transformer import Transformer, get_device
 import time
 import math
@@ -74,8 +74,8 @@ def train_model():
 
             # --- Cambios clave aquí ---
             # 1. Aplicar padding ANTES de convertir a tensores
-            en_batch = [fill_sentence(sentence, MAX_SEQ_LENGTH) for sentence in en_batch]
-            es_batch = [fill_sentence(sentence, MAX_SEQ_LENGTH) for sentence in es_batch]
+            #en_batch = [fill_sentence_batch(sentence, MAX_SEQ_LENGTH) for sentence in en_batch]
+            #es_batch = [fill_sentence_batch(sentence, MAX_SEQ_LENGTH) for sentence in es_batch]
 
             # 2. Convertir directamente usando el vocabulario
             en_tensor = torch.tensor(
