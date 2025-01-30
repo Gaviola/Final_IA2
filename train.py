@@ -1,19 +1,18 @@
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
-from data_proccess import TextDS, load_vocab, create_masks, collate_fn, MAX_SEQ_LENGTH, load_data_set, fill_sentence_batch
+from data_proccess import TextDS, load_vocab, create_masks, collate_fn, MAX_SEQ_LENGTH, load_data_set, process_line
 from transformer import Transformer, get_device
 import time
-import math
 
 # Configuración hiperparámetros
 BATCH_SIZE = 32
-NUM_EPOCHS = 10
+NUM_EPOCHS = 2
 LEARNING_RATE = 3e-4
-D_MODEL = 512
+D_MODEL = 256
 NUM_HEADS = 8
 NUM_LAYERS = 3
-FFN_HIDDEN = 2048
+FFN_HIDDEN = 1024
 DROPOUT_PROB = 0.1
 
 
@@ -50,9 +49,61 @@ def initialize_model(en_vocab, es_vocab):
     return model
 
 
+def translate_examples(model, en_vocab, es_vocab, device, examples):
+    """Traduce oraciones de ejemplo usando el modelo entrenado."""
+    model.eval()
+    reverse_es_vocab = {idx: word for word, idx in es_vocab.items()}
+
+    for en_sentence in examples:
+        # Preprocesar y tokenizar
+        en_tokens = process_line(en_sentence).split()
+        en_tokens = [en_vocab.get(word, en_vocab["[UNK]"]) for word in en_tokens][:MAX_SEQ_LENGTH]
+
+        # Convertir a tensor y añadir padding
+        en_tensor = torch.tensor([en_tokens], device=device)
+        en_tensor = torch.nn.functional.pad(
+            en_tensor,
+            (0, MAX_SEQ_LENGTH - len(en_tokens)),
+            value=en_vocab["[PAD]"]
+        )
+
+        # Generar traducción autoregresiva
+        decoder_input = torch.tensor([[es_vocab["[START]"]]], device=device)
+        translated_tokens = []
+
+        with torch.no_grad():
+            encoder_output = model.encoder(en_tensor, None, start_token=False, end_token=False)
+
+            for _ in range(MAX_SEQ_LENGTH):
+                decoder_output = model.decoder(
+                    encoder_output,
+                    decoder_input,
+                    None,
+                    None,
+                    start_token=False,
+                    end_token=False
+                )
+                next_token = torch.argmax(decoder_output[:, -1, :], dim=-1)
+                decoded_word = reverse_es_vocab[next_token.item()]
+
+                if decoded_word == "[EOS]":
+                    break
+
+                translated_tokens.append(decoded_word)
+                decoder_input = torch.cat(
+                    [decoder_input, next_token.unsqueeze(0)],
+                    dim=-1
+                )
+
+        print(f"\nInput (EN): {en_sentence}")
+        print(f"Output (ES): {' '.join(translated_tokens)}")
+
+
+
 # Función de entrenamiento
 def train_model():
     train_data, val_data, en_vocab, es_vocab = prepare_data()
+    scaler = torch.GradScaler()  # Inicializa al inicio
 
     # Crear DataLoaders
     train_loader = DataLoader(train_data, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_fn)
@@ -60,7 +111,7 @@ def train_model():
 
     model = initialize_model(en_vocab, es_vocab)
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
-    criterion = nn.CrossEntropyLoss(ignore_index=en_vocab["[PAD]"])
+    criterion = nn.CrossEntropyLoss(ignore_index=es_vocab["[PAD]"])
 
     best_val_loss = float('inf')
 
@@ -71,11 +122,6 @@ def train_model():
 
         for batch_idx, (en_batch, es_batch) in enumerate(train_loader):
             optimizer.zero_grad()
-
-            # --- Cambios clave aquí ---
-            # 1. Aplicar padding ANTES de convertir a tensores
-            #en_batch = [fill_sentence_batch(sentence, MAX_SEQ_LENGTH) for sentence in en_batch]
-            #es_batch = [fill_sentence_batch(sentence, MAX_SEQ_LENGTH) for sentence in es_batch]
 
             # 2. Convertir directamente usando el vocabulario
             en_tensor = torch.tensor(
@@ -98,41 +144,39 @@ def train_model():
             # Preparar entrada/salida del decoder
             decoder_input = [["[START]"] + sentence[:-1] for sentence in es_batch]
 
-            # Convertir a tensores
-            en_tensor = torch.tensor(
-                [[en_vocab.get(word, en_vocab["[UNK]"]) for word in sentence] for sentence in en_batch]).to(
-                get_device())
-            decoder_input_tensor = torch.tensor(
-                [[es_vocab.get(word, es_vocab["[UNK]"]) for word in sentence] for sentence in decoder_input]).to(
-                get_device())
-            target_tensor = torch.tensor(
-                [[es_vocab.get(word, es_vocab["[UNK]"]) for word in sentence] for sentence in es_batch]).to(
-                get_device())
-
             # Forward pass
-            outputs = model(
-                en_tensor,
-                decoder_input_tensor,
-                encoder_self_attention_mask=enc_mask.to(get_device()),
-                decoder_self_attention_mask=dec_self_mask.to(get_device()),
-                decoder_cross_attention_mask=dec_cross_mask.to(get_device())
-            )
+            with torch.autocast(device_type=get_device().type):
 
-            # Calcular pérdida
-            loss = criterion(outputs.view(-1, len(es_vocab)), target_tensor.view(-1))
-            train_loss += loss.item()
+                outputs = model(
+                    en_tensor,
+                    decoder_input_tensor,
+                    encoder_self_attention_mask=enc_mask.to(get_device()),
+                    decoder_self_attention_mask=dec_self_mask.to(get_device()),
+                    decoder_cross_attention_mask=dec_cross_mask.to(get_device())
+                )
+
+                # Calcular pérdida
+                loss = criterion(outputs.view(-1, len(es_vocab)), target_tensor.view(-1))
+                train_loss += loss.item()
 
             # Backward pass
-            loss.backward()
+            scaler.scale(loss).backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
 
             # Mostrar progreso cada 50 batches
             if batch_idx % 50 == 0:
                 current_loss = loss.item()
                 current_batch = batch_idx * BATCH_SIZE
                 print(
-                    f'Epoch: {epoch + 1:02} | Batch: {batch_idx:04} | Loss: {current_loss:.3f} | Examples: {current_batch}/{len(train_data)}')
+                    f'Epoch: {epoch + 1:02}'
+                    f' | Batch: {batch_idx:04}'
+                    f' | Loss: {current_loss:.3f}'
+                    f' | Examples: {current_batch}/{len(train_data)}'
+                    f' | Time: {time.time() - start_time:.2f}s')
+
+            torch.cuda.empty_cache()
 
         # Validación
         model.eval()
@@ -175,9 +219,25 @@ def train_model():
         # Guardar mejor modelo
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
-            torch.save(model.state_dict(), f'best_model_epoch{epoch + 1}.pt')
+            torch.save(model.state_dict(), f'models/best_model_epoch{epoch + 1}.pt')
             print(f'New best model saved! Val Loss: {avg_val_loss:.3f}\n')
+"""
+        print("\nTesting translations...")
+        test_examples = [
+            "Hello, how are you?",
+            "The weather is nice today.",
+            "Where is the nearest hospital?",
+            "This is a sample sentence for testing."
+        ]
 
+        translate_examples(
+            model,
+            en_vocab,
+            es_vocab,
+            get_device(),
+            test_examples
+        )
+"""
 
 if __name__ == "__main__":
     # Verificar GPU

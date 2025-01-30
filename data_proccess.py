@@ -21,20 +21,20 @@ class TextDS(Dataset):
     def __getitem__(self, index: int):
         return self.english_text[index], self.spanish_text[index]
 
-def process_line(line: str) -> str:
-    line = re.sub(r"[^a-zA-Z0-9ñÑáéíóú\s\-()?¿!¡\"\',.]", "", line)
-    line = re.sub(r"([?¿!¡()\"\',.])", r" \1 ", line)
+def process_line(line: str, punt_charac: bool = False, ind_num: bool = True) -> str:
+    if punt_charac:
+        line = re.sub(r"[^a-zA-Z0-9ñÑáéíóú\s\-?¿¡!()\"\',.]", "", line)
+        line = re.sub(r"([?¿!¡()\"\',.])", r" \1 ", line) # Separar puntuaciones para que los tome como tokens individuales
+    else:
+        line = re.sub(r"[^a-zA-Z0-9ñÑáéíóú\s\-]", "", line)
+    if ind_num:
+        line = re.sub(r"([0-9])", r" \1 ", line) # Separar números para que los tome como tokens individuales
     return line.lower().strip()
 
 MAX_SEQ_LENGTH = 300
 max_sequense_length = MAX_SEQ_LENGTH
 PADDING_TOKEN = "[PAD]"
 NEG_INF = -1e10
-
-"""
-Crea un archivo de texto que contendra el vocabulario de las palabras en el texto encontradas en el texto
-"""
-
 
 def build_vocab(text_path: str, max_vocab_size: int = 5000, path: str = "data/default_vocab.txt") -> None:
     with open(text_path, "r", encoding='utf-8') as file:
@@ -74,20 +74,32 @@ def create_data_set(max_sentences: int = 100000) -> None:
     text_es = []
     text_en = []
 
-    with open("data/en-es.txt/ParaCrawl.en-es.es", "r", encoding='utf-8') as file:
-        for i, line in enumerate(file):
-            if i >= max_sentences:
-                break
-            text_es.append(process_line(line).split())
+    with open("data/en-es.txt/ParaCrawl.en-es.es", "r", encoding='utf-8') as es_file, \
+            open("data/en-es.txt/ParaCrawl.en-es.en", "r", encoding='utf-8') as en_file:
 
-    with open("data/en-es.txt/ParaCrawl.en-es.en", "r", encoding='utf-8') as file:
-        for i, line in enumerate(file):
-            if i >= max_sentences:
+        added_count = 0
+        for es_line, en_line in zip(es_file, en_file):
+            if added_count >= max_sentences:
                 break
-            text_en.append(process_line(line).split())
+
+            # Procesar ambas oraciones
+            processed_es = process_line(es_line).split()
+            processed_en = process_line(en_line).split()
+
+            # Filtrar por longitud
+            if len(processed_es) > MAX_SEQ_LENGTH or len(processed_en) > MAX_SEQ_LENGTH:
+                continue  # Saltar este par
+
+            text_es.append(processed_es)
+            text_en.append(processed_en)
+            added_count += 1
+
+    # Escribir solo las oraciones válidas
     with open("data/dataset.txt", "w", encoding='utf-8') as file:
-        for i in range(len(text_es)):
-            file.write(f"{text_en[i]}\t{text_es[i]}\n")
+        for en, es in zip(text_en, text_es):
+            file.write(f"{en}\t{es}\n")
+
+    print(f"Dataset creado con {len(text_es)} pares válidos (max_length={MAX_SEQ_LENGTH}).")
 
 
 def load_data_set(path: str) -> TextDS:
@@ -119,19 +131,6 @@ def fill_sentence_batch(sentences: list[list[str]], max_len: int) -> torch.Tenso
     return torch.tensor(padded, device=get_device())  # Vectorizado
 
 def create_masks(en_batch, es_batch):
-    """
-    Crea mascara para el encoder y decoder para manejar el padding dentro de los batch.
-
-    Args:
-        en_batch (lista de str): Batch de sentencias en Ingles, cada sentencia es una lista de tokens.
-        es_batch (lista de str): Batch de sentencias en Español, cada sentencia es una lista de tokens.
-
-    Returns:
-        tuple: Una tupla que contiene 3 mascaras:
-            - encoder_self_attention_mask (torch.Tensor): Mascara de self-attetion para el encoder.
-            - decoder_self_attention_mask (torch.Tensor): Mascara de self-attetion para el decoder.
-            - decoder_cross_attention_mask (torch.Tensor): Mascara de cross-attetion para el decoder.
-    """
     num_sentences = len(en_batch)
 
     # Crea la mascara de look-ahead para el decoder
@@ -170,15 +169,6 @@ def create_masks(en_batch, es_batch):
     return encoder_self_attention_mask, decoder_self_attention_mask, decoder_cross_attention_mask
 
 def collate_fn(batch):
-    """
-        Función de colación para preparar los lotes de datos.
-
-        Args:
-            batch (list): Lista de tuplas, donde cada tupla contiene una sentencia en inglés y su correspondiente en español.
-
-        Returns:
-            tuple: Dos listas, una para las sentencias en inglés y otra para las sentencias en español, con padding.
-    """
     en_batch, es_batch = zip(*batch)
     en_batch = [sentence + [PADDING_TOKEN] * (max_sequense_length - len(sentence)) for sentence in en_batch]
     es_batch = [sentence + [PADDING_TOKEN] * (max_sequense_length - len(sentence)) for sentence in es_batch]
@@ -186,10 +176,10 @@ def collate_fn(batch):
 
 
 if __name__ == "__main__":
-    dataset = load_data_set("data/dataset.txt")
-    #Probar fill_sentence_batch
-    print(fill_sentence_batch(["hola", "como", "estas"], 10))
+    #dataset = load_data_set("data/dataset.txt")
+    create_data_set()
+    build_vocab("data/en-es.txt/ParaCrawl.en-es.es", path="data/vocab_es.txt")
+    build_vocab("data/en-es.txt/ParaCrawl.en-es.en", path="data/vocab_en.txt")
     #save_preprocessed_data(dataset, "data/preprocessed_data.pt")
-    #print(torch.cuda.is_available())  # Debería devolver True si hay GPU con CUDA.
     print("Done")
 

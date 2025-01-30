@@ -74,33 +74,12 @@ class SentenceEmbedding(nn.Module):
         self.UNKNOWN_TOKEN = "[UNK]"
 
     def batch_tokenize(self, batch: list, start_token=True, end_token=True) -> torch.Tensor:
-        """
-        Tokeniza un lote de oraciones.
-
-        Args:
-            batch (torch.Tensor): Lote de oraciones a tokenizar.
-            start_token (bool): Si se debe agregar el token de inicio.
-            end_token (bool): Si se debe agregar el token de fin.
-
-        Returns:
-            torch.Tensor: Tensor de oraciones tokenizadas.
-        """
 
         def tokenize(sentence: list[str], start_token: bool=True, end_token: bool =True):
-            """
-            Tokeniza una oración individual.
 
-            Args:
-                sentence (list[str]): Oración a tokenizar.
-                start_token (bool): Si se debe agregar el token de inicio.
-                end_token (bool): Si se debe agregar el token de fin.
-
-            Returns:
-                torch.Tensor: Tensor de índices de palabras.
-            """
             indices = []
             if start_token:
-                indices.append(self.language_to_index[self.START_TOKEN])
+                indices.insert(0,self.language_to_index[self.START_TOKEN])
             indices.extend([self.language_to_index.get(word, self.language_to_index[self.UNKNOWN_TOKEN])
                             for word in sentence])
             if end_token:
