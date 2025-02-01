@@ -1,9 +1,10 @@
 import re
-
 import numpy as np
 import torch
+from train import TranslationDataset, Vocabulary
 
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
+
 
 def get_device():
     return torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
@@ -28,15 +29,15 @@ def process_line(line: str, punt_charac: bool = False, ind_num: bool = True) -> 
     else:
         line = re.sub(r"[^a-zA-Z0-9ñÑáéíóú\s\-]", "", line)
     if ind_num:
-        line = re.sub(r"([0-9])", r" \1 ", line) # Separar números para que los tome como tokens individuales
+        line = re.sub(r"([0-9\-])", r" \1 ", line) # Separar números para que los tome como tokens individuales
     return line.lower().strip()
 
-MAX_SEQ_LENGTH = 300
-max_sequense_length = MAX_SEQ_LENGTH
+BATCH_SIZE = 64
+MAX_SEQ_LENGTH = 100
 PADDING_TOKEN = "[PAD]"
 NEG_INF = -1e10
 
-def build_vocab(text_path: str, max_vocab_size: int = 5000, path: str = "data/default_vocab.txt") -> None:
+def build_vocab(text_path: str, max_vocab_size: int = 70000, path: str = "data/default_vocab.txt", whole = False) -> None:
     with open(text_path, "r", encoding='utf-8') as file:
         texts = file.readlines()
 
@@ -47,12 +48,18 @@ def build_vocab(text_path: str, max_vocab_size: int = 5000, path: str = "data/de
     words.add("[EOS]")
     i = 0
 
-    while len(words) < max_vocab_size and i < len(texts):
-        line = texts[i]
-        trim_line = process_line(line).split()
-        i += 1
-        for j in range(len(trim_line)):
-            words.add(trim_line[j])
+    if whole:
+        for line in texts:
+            trim_line = process_line(line).split()
+            for j in range(len(trim_line)):
+                words.add(trim_line[j])
+    else:
+        while len(words) < max_vocab_size and i < len(texts):
+            line = texts[i]
+            trim_line = process_line(line).split()
+            i += 1
+            for j in range(len(trim_line)):
+                words.add(trim_line[j])
 
     with open(path, 'w', encoding='utf-8') as f:
         for word in words:
@@ -70,7 +77,10 @@ def load_vocab(path: str) -> tuple[dict, dict]:
     return vocab, reverse_vocab
 
 
-def create_data_set(max_sentences: int = 100000) -> None:
+def create_data_set(max_sentences: int = 200000, vocab_only = False) -> None:
+    vocab_en, _ = load_vocab("data/vocab_en_70000.txt")
+    vocab_es, _ = load_vocab("data/vocab_es_70000.txt")
+
     text_es = []
     text_en = []
 
@@ -87,19 +97,30 @@ def create_data_set(max_sentences: int = 100000) -> None:
             processed_en = process_line(en_line).split()
 
             # Filtrar por longitud
-            if len(processed_es) > MAX_SEQ_LENGTH or len(processed_en) > MAX_SEQ_LENGTH:
+            if len(processed_es) > MAX_SEQ_LENGTH - 2 or len(processed_en) > MAX_SEQ_LENGTH - 2:
                 continue  # Saltar este par
 
-            text_es.append(processed_es)
-            text_en.append(processed_en)
-            added_count += 1
+            if vocab_only:
+                # Filtrar por vocabulario
+                valid_es = all(word in vocab_es for word in processed_es)
+                valid_en = all(word in vocab_en for word in processed_en)
+                if valid_es and valid_en:
+                    text_es.append(processed_es)
+                    text_en.append(processed_en)
+                    added_count += 1
+            else:
+                text_es.append(processed_es)
+                text_en.append(processed_en)
+                added_count += 1
+
+
 
     # Escribir solo las oraciones válidas
-    with open("data/dataset.txt", "w", encoding='utf-8') as file:
+    with open("data/dataset_200000.txt", "w", encoding='utf-8') as file:
         for en, es in zip(text_en, text_es):
             file.write(f"{en}\t{es}\n")
 
-    print(f"Dataset creado con {len(text_es)} pares válidos (max_length={MAX_SEQ_LENGTH}).")
+    print(f"Dataset creado con {len(text_es)} pares válidos (MAX_SEQ_LENGTH={MAX_SEQ_LENGTH}).")
 
 
 def load_data_set(path: str) -> TextDS:
@@ -170,16 +191,41 @@ def create_masks(en_batch, es_batch):
 
 def collate_fn(batch):
     en_batch, es_batch = zip(*batch)
-    en_batch = [sentence + [PADDING_TOKEN] * (max_sequense_length - len(sentence)) for sentence in en_batch]
-    es_batch = [sentence + [PADDING_TOKEN] * (max_sequense_length - len(sentence)) for sentence in es_batch]
+    en_batch = [sentence + [PADDING_TOKEN] * (MAX_SEQ_LENGTH - len(sentence)) for sentence in en_batch]
+    es_batch = [sentence + [PADDING_TOKEN] * (MAX_SEQ_LENGTH - len(sentence)) for sentence in es_batch]
     return en_batch, es_batch
+
+def print_vocab_stats(vocab, name):
+    print(f"\nEstadísticas del vocabulario {name}:")
+    print(f"Total de palabras: {len(vocab)}")
+    print(f"Ejemplo de mapeo:")
+    for i in range(5):
+        print(f"{vocab.idx2word[i]} -> {i}")
+
+def inspect_batch(batch, src_vocab, tgt_vocab):
+    print("\nInspección de batch:")
+    print("Secuencia fuente (índices):", batch['src'][0])
+    print("Secuencia fuente (palabras):", [src_vocab.idx2word.get(idx.item(), '<unk>') for idx in batch['src'][0]])
+    print("Secuencia objetivo (índices):", batch['tgt'][0])
+    print("Secuencia objetivo (palabras):", [tgt_vocab.idx2word.get(idx.item(), '<unk>') for idx in batch['tgt'][0]])
 
 
 if __name__ == "__main__":
-    #dataset = load_data_set("data/dataset.txt")
-    create_data_set()
-    build_vocab("data/en-es.txt/ParaCrawl.en-es.es", path="data/vocab_es.txt")
-    build_vocab("data/en-es.txt/ParaCrawl.en-es.en", path="data/vocab_en.txt")
-    #save_preprocessed_data(dataset, "data/preprocessed_data.pt")
+    build_vocab("data/en-es.txt/ParaCrawl.en-es.es", path="data/vocab_es_70000.txt")
+    build_vocab("data/en-es.txt/ParaCrawl.en-es.en", path="data/vocab_en_70000.txt")
+    create_data_set(vocab_only=True)
+
+    #src_vocab = Vocabulary('data/vocab_en_70000.txt')
+    #tgt_vocab = Vocabulary('data/vocab_es_70000.txt')
+
+    #print_vocab_stats(src_vocab,"en")
+    #print_vocab_stats(tgt_vocab,"es")
+
+    #dataset = TranslationDataset('data/dataset_200000.txt', src_vocab, tgt_vocab, MAX_SEQ_LENGTH)
+    #dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
+
+    #first_batch = next(iter(dataloader))
+    #inspect_batch(first_batch, src_vocab, tgt_vocab)
+
     print("Done")
 
