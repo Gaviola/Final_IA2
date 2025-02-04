@@ -1,105 +1,9 @@
 import torch
 import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 import time
-import re
-
+from data_proccess import process_line, Vocabulary, TranslationDataset
 from transformer import Transformer
-
-def process_line( line: str, punt_charac: bool = False, ind_num: bool = True) -> str:
-    if punt_charac:
-        line = re.sub(r"[^a-zA-Z0-9ñÑáéíóú\s\-?¿¡!()\"\',.]", "", line)
-        line = re.sub(r"([?¿!¡()\"\',.])", r" \1 ",line)  # Separar puntuaciones para que los tome como tokens individuales
-    else:
-        line = re.sub(r"[^a-zA-Z0-9ñÑáéíóú\s\-]", "", line)
-    if ind_num:
-        line = re.sub(r"([0-9\-])", r" \1 ", line)  # Separar números para que los tome como tokens individuales
-    return line.lower().strip()
-
-# Clases y funciones principales
-class Vocabulary:
-    def __init__(self, vocab_file):
-        self.word2idx = {}
-        self.idx2word = {}
-        self.special_tokens = ['<pad>', '<sos>', '<eos>', '<unk>']
-
-        # Cargar palabras del archivo
-        with open(vocab_file, 'r', encoding='utf-8') as f:
-            words = [line.strip() for line in f]
-
-        # Añadir tokens especiales
-        for idx, token in enumerate(self.special_tokens):
-            self.word2idx[token] = idx
-            self.idx2word[idx] = token
-
-        # Añadir palabras del vocabulario
-        for idx, word in enumerate(words, start=len(self.special_tokens)):
-            self.word2idx[word] = idx
-            self.idx2word[idx] = word
-
-        self.pad_token = self.word2idx['<pad>']
-        self.sos_token = self.word2idx['<sos>']
-        self.eos_token = self.word2idx['<eos>']
-        self.unk_token = self.word2idx['<unk>']
-
-    def __len__(self):
-        return len(self.word2idx)
-
-
-class TranslationDataset(Dataset):
-    def __init__(self, data_file, src_vocab, tgt_vocab, max_length=100):
-        self.src_vocab = src_vocab
-        self.tgt_vocab = tgt_vocab
-        self.pairs = []
-
-
-        with open(data_file, 'r', encoding='utf-8') as f:
-            for line in f:
-                parts = line.strip().split('\t')
-                if len(parts) == 2:
-                    src_sent = process_line(parts[0])
-                    tgt_sent = process_line(parts[1])
-                    self.pairs.append((src_sent, tgt_sent))
-
-        self.max_length = max_length
-
-    def sentence_to_indices(self, sentence, vocab) -> list:
-        # Convertir a minúsculas y limpiar antes de tokenizar
-        sentence = process_line(sentence)
-        words = sentence.split()
-        indices = [vocab.sos_token]
-
-        # Mapeo con verificación explícita
-        for word in words:
-            if word in vocab.word2idx:
-                indices.append(vocab.word2idx[word])
-            else:
-                indices.append(vocab.unk_token)
-
-        indices.append(vocab.eos_token)
-        return indices
-
-    def __getitem__(self, idx):
-        src_sent, tgt_sent = self.pairs[idx]
-
-        # Procesar secuencia fuente
-        src_indices = self.sentence_to_indices(src_sent, self.src_vocab)
-        #src_indices = src_indices[:self.max_length]
-        src_indices = src_indices + [self.src_vocab.pad_token] * (self.max_length - len(src_indices))
-
-        # Procesar secuencia objetivo
-        tgt_indices = self.sentence_to_indices(tgt_sent, self.tgt_vocab)
-        #tgt_indices = tgt_indices[:self.max_length]
-        tgt_indices = tgt_indices + [self.tgt_vocab.pad_token] * (self.max_length - len(tgt_indices))
-
-        return {
-            'src': torch.LongTensor(src_indices[:self.max_length]),
-            'tgt': torch.LongTensor(tgt_indices[:self.max_length])
-        }
-
-    def __len__(self):
-        return len(self.pairs)
-
 
 def create_masks(src, tgt, src_pad_token, tgt_pad_token):
     # Máscara para encoder (padding)
@@ -151,16 +55,30 @@ def translate(sentence, model, src_vocab, tgt_vocab, max_length=100, device='cpu
 
 if __name__ == "__main__":
 
-    # Configuración principal
-    BATCH_SIZE = 32
-    NUM_EPOCHS = 10
-    LEARNING_RATE = 0.0002
-    D_MODEL = 256
-    NUM_LAYERS = 3
-    NUM_HEADS = 4
-    D_FF = 1024
-    MAX_LENGTH = 100
-    DROPOUT = 0.2
+    mini = True
+
+    if mini:
+        # Configuración mini
+        BATCH_SIZE = 32
+        NUM_EPOCHS = 5
+        LEARNING_RATE = 0.0002
+        D_MODEL = 256
+        NUM_LAYERS = 3
+        NUM_HEADS = 4
+        D_FF = 1024
+        MAX_LENGTH = 100
+        DROPOUT = 0.2
+    else:
+        # Configuración completa
+        BATCH_SIZE = 64
+        NUM_EPOCHS = 2
+        LEARNING_RATE = 0.0002
+        D_MODEL = 512
+        NUM_LAYERS = 6
+        NUM_HEADS = 8
+        D_FF = 2048
+        MAX_LENGTH = 100
+        DROPOUT = 0.2
 
     print(f"device: {torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')}\n"
           f"batch_size: {BATCH_SIZE}\n"
@@ -175,11 +93,11 @@ if __name__ == "__main__":
 
 
     # Cargar vocabularios
-    src_vocab = Vocabulary('data/vocab_en_70000.txt')
-    tgt_vocab = Vocabulary('data/vocab_es_70000.txt')
+    src_vocab = Vocabulary('data/subs/vocab_sub_en_70000.txt')
+    tgt_vocab = Vocabulary('data/subs/vocab_sub_es_70000.txt')
 
     # Preparar datos
-    dataset = TranslationDataset('data/dataset_200000.txt', src_vocab, tgt_vocab, MAX_LENGTH)
+    dataset = TranslationDataset('data/subs/dataset_200000.txt', src_vocab, tgt_vocab, MAX_LENGTH)
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
 
     # Inicializar modelo
@@ -253,7 +171,7 @@ if __name__ == "__main__":
             print(f"Original: {ex}\n")
             print(f"Traducción: {translation}\n")
 
-        torch.save(model.state_dict(), f'models/best_model_mini_epoch{epoch + 1}.pt')
+        torch.save(model.state_dict(), f'models/best_model_mini_sub_epoch{epoch + 1}.pt')
 
     # Ejemplo de traducción
     test_sentence = "your computer has enough resources"

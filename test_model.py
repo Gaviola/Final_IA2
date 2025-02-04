@@ -23,19 +23,34 @@ def load_model(model_path, config, device):
 
 if __name__ == "__main__":
     # Configuración (debe coincidir con el entrenamiento)
-    CONFIG = {
-        'src_vocab_size': 70000,
-        'tgt_vocab_size': 70000,
-        'd_model': 512,
-        'num_layers': 6,
-        'num_heads': 8,
-        'd_ff': 2048,
-        'max_len': 100,
-        'dropout': 0.1
-    }
+
+    mini = True
+
+    if mini:
+        CONFIG = {
+            'src_vocab_size': 70000,
+            'tgt_vocab_size': 70000,
+            'd_model': 256,
+            'num_layers': 3,
+            'num_heads': 4,
+            'd_ff': 1024,
+            'max_len': 100,
+            'dropout': 0.2
+        }
+    else:
+        CONFIG = {
+            'src_vocab_size': 70000,
+            'tgt_vocab_size': 70000,
+            'd_model': 512,
+            'num_layers': 6,
+            'num_heads': 8,
+            'd_ff': 2048,
+            'max_len': 100,
+            'dropout': 0.2
+        }
 
     # Parámetros de prueba
-    MODEL_PATH = 'models/best_model_mini_epoch1.pt'
+    MODEL_PATH = 'models/best_model_mini_epoch7.pt'
     SRC_VOCAB_FILE = 'data/vocab_en_70000.txt'
     TGT_VOCAB_FILE = 'data/vocab_es_70000.txt'
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -56,8 +71,10 @@ if __name__ == "__main__":
 
     for ex in [ex1, ex2, ex3, ex4, ex5]:
         translation = translate(ex, model, src_vocab, tgt_vocab, device=DEVICE.type)
+        print("-"*100)
         print(f"Original: {ex}\n")
         print(f"Traducción: {translation}\n")
+        print("-" * 100)
 
     # Bucle interactivo
     print("Traductor Inglés-Español (escribe 'exit' para salir)")
@@ -67,5 +84,6 @@ if __name__ == "__main__":
             break
 
         translation = translate(sentence, model, src_vocab, tgt_vocab, device=DEVICE.type)
+        print("-" * 100)
         print(f"Traducción: {translation}")
 
