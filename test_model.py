@@ -3,7 +3,18 @@ from train import Vocabulary, process_line, translate
 from transformer import Transformer
 
 
-def load_model(model_path, config, device):
+def load_model(model_path: str, config: dict, device: torch.device) -> Transformer:
+    """
+    Carga un modelo Transformer desde un archivo.
+
+    Args:
+        model_path (str): Ruta al archivo del modelo guardado.
+        config (dict): Diccionario de configuración con los parámetros del modelo.
+        device (torch.device): Dispositivo en el que se cargará el modelo (CPU o GPU).
+
+    Returns:
+        Transformer: El modelo Transformer cargado y preparado para evaluación.
+    """
     model = Transformer(
         src_vocab_size=config['src_vocab_size'],
         tgt_vocab_size=config['tgt_vocab_size'],
@@ -28,31 +39,31 @@ if __name__ == "__main__":
 
     if mini:
         CONFIG = {
-            'src_vocab_size': 70000,
-            'tgt_vocab_size': 70000,
+            'src_vocab_size': 120000,
+            'tgt_vocab_size': 120000,
             'd_model': 256,
             'num_layers': 3,
             'num_heads': 4,
             'd_ff': 1024,
             'max_len': 100,
-            'dropout': 0.2
+            'dropout': 0.1
         }
     else:
         CONFIG = {
-            'src_vocab_size': 70000,
-            'tgt_vocab_size': 70000,
+            'src_vocab_size': 120000,
+            'tgt_vocab_size': 120000,
             'd_model': 512,
             'num_layers': 6,
             'num_heads': 8,
             'd_ff': 2048,
             'max_len': 100,
-            'dropout': 0.2
+            'dropout': 0.1
         }
 
     # Parámetros de prueba
     MODEL_PATH = 'models/best_model_mini_epoch7.pt'
-    SRC_VOCAB_FILE = 'data/vocab_en_70000.txt'
-    TGT_VOCAB_FILE = 'data/vocab_es_70000.txt'
+    SRC_VOCAB_FILE = 'data/vocab_en_120000.txt'
+    TGT_VOCAB_FILE = 'data/vocab_es_120000.txt'
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # Cargar componentes
@@ -63,11 +74,11 @@ if __name__ == "__main__":
 
     model = load_model(MODEL_PATH, CONFIG, DEVICE)
 
-    ex1 = "I am going to the park"
-    ex2 = "Hello, how are you?"
+    ex1 = "I love machine learning"
+    ex2 = "The book that you lent me is fascinating"
     ex3 = "Hello world"
-    ex4 = "This is a test sentence"
-    ex5 = "this should be translated to spanish"
+    ex4 = "Although artificial intelligence has many benefits, some people worry about its ethical implications."
+    ex5 = "This should be translated to spanish"
 
     for ex in [ex1, ex2, ex3, ex4, ex5]:
         translation = translate(ex, model, src_vocab, tgt_vocab, device=DEVICE.type)
