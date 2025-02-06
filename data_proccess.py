@@ -1,11 +1,9 @@
 import os
 import re
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
-from itertools import count
-
+from concurrent.futures import ThreadPoolExecutor
+import xml.etree.ElementTree as ET
 import torch
-from sympy.integrals.intpoly import strip
 from torch.utils.data import Dataset, DataLoader
 
 
@@ -15,7 +13,7 @@ def get_device():
 def process_line(line: str, ind_num: bool = True) -> str:
     line = re.sub(r"[^a-zA-Z0-9ñÑáéíóú\s\-']", "", line)
     line = re.sub(r"([\-])", " ", line) # Separar guiones
-    # Separar apóstrofes, unicamente si estan en los extremos de una palabra ('food'), para que los tome como tokens individuales
+    #Separar apóstrofes, unicamente si estan en los extremos de una palabra ('food'), para que los tome como tokens individuales
     line = re.sub(r"(?<!\w)'|'(?!\w)", " ' ", line)
     if ind_num:
         line = re.sub(r"([0-9])", r" \1 ", line) # Separar números para que los tome como tokens individuales
@@ -71,7 +69,7 @@ class TranslationDataset(Dataset):
         self.max_length = max_length
 
     def sentence_to_indices(self, sentence, vocab) -> list:
-        indices = [vocab.sos_token]
+        indices = [vocab.sos_token] # Agregamos Inicio de secuencia
 
         # Mapeo con verificación explícita
         for word in sentence:
@@ -80,7 +78,8 @@ class TranslationDataset(Dataset):
             else:
                 indices.append(vocab.unk_token)
 
-        indices.append(vocab.eos_token)
+
+        indices.append(vocab.eos_token) # Agregamos Fin de secuencia
         return indices
 
     def __getitem__(self, idx):
@@ -103,10 +102,6 @@ class TranslationDataset(Dataset):
 
     def __len__(self):
         return len(self.pairs)
-
-BATCH_SIZE = 64
-MAX_SEQ_LENGTH = 100
-NEG_INF = -1e10
 
 
 def build_vocab(text_path: str, max_vocab_size: int = 120000, path: str = "data/default_vocab.txt") -> None:
@@ -144,9 +139,14 @@ def load_vocab(path: str) -> tuple[dict, dict]:
     return vocab, reverse_vocab
 
 
-def create_data_set(source: str,max_sentences: int = 600000, vocab_only = False) -> None:
-    vocab_en, _ = load_vocab(f"data/subs/vocab_en_120000.txt")
-    vocab_es, _ = load_vocab(f"data/subs/vocab_es_120000.txt")
+def create_data_set(source: str,
+                    max_sentences: int = 600000,
+                    MAX_SEQ_LENGTH: int = 100,
+                    vocab_only: bool = False,
+                    ) -> None:
+
+    vocab_en, _ = load_vocab(f"data/vocab_en_120000.txt")
+    vocab_es, _ = load_vocab(f"data/vocab_es_120000.txt")
 
     text_es = []
     text_en = []
@@ -183,33 +183,20 @@ def create_data_set(source: str,max_sentences: int = 600000, vocab_only = False)
                 text_en.append(processed_en)
                 added_count += 1
 
-    # Escribir solo las oraciones válidas
-    with open(f"data/subs/dataset_{max_sentences}.txt", "w", encoding='utf-8') as file:
+    # Escribir el dataset resultante
+    with open(f"data/en-es.txt/dataset_{max_sentences}.txt", "w", encoding='utf-8') as file:
+        # Se escribe en cada línea el par "inglés | español"
         for en, es in zip(text_en, text_es):
             file.write(f"{en} | {es}\n")
 
     print(f"Dataset creado con {len(text_es)} pares válidos (MAX_SEQ_LENGTH={MAX_SEQ_LENGTH}).")
 
 
-def print_vocab_stats(vocab, name):
-    print(f"\nEstadísticas del vocabulario {name}:")
-    print(f"Total de palabras: {len(vocab)}")
-    print(f"Ejemplo de mapeo:")
-    for i in range(5):
-        print(f"{vocab.idx2word[i]} -> {i}")
-
-def inspect_batch(batch, src_vocab, tgt_vocab):
-    print("\nInspección de batch:")
-    print("Secuencia fuente (índices):", batch['src'][0])
-    print("Secuencia fuente (palabras):", [src_vocab.idx2word.get(idx.item(), '<unk>') for idx in batch['src'][0]])
-    print("Secuencia objetivo (índices):", batch['tgt'][0])
-    print("Secuencia objetivo (palabras):", [tgt_vocab.idx2word.get(idx.item(), '<unk>') for idx in batch['tgt'][0]])
-
-
 if __name__ == "__main__":
     #build_vocab("data/en-es.txt/ParaCrawl.en-es.es", path="data/vocab_es_120000.txt")
     #build_vocab("data/en-es.txt/ParaCrawl.en-es.en", path="data/vocab_en_120000.txt")
-    create_data_set(source="data/subs/OpenSubtitles.en-es", vocab_only=True)
+    create_data_set(source="data/en-es.txt/ParaCrawl.en-es", vocab_only=True)
+
 
     #src_vocab = Vocabulary('data/vocab_en_70000.txt')
     # = Vocabulary('data/vocab_es_70000.txt')
@@ -219,17 +206,6 @@ if __name__ == "__main__":
 
     #dataset = TranslationDataset('data/dataset_200000.txt', src_vocab, tgt_vocab, MAX_SEQ_LENGTH)
     #dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
-
-    #first_batch = next(iter(dataloader))
-    #inspect_batch(first_batch, src_vocab, tgt_vocab)
-
-    #print(process_line("We've already conducted a thorough sweep of Eva-01.").split())
-    #print(process_line("We only found you.").split())
-    #print(process_line("And for some reason this was restored.").split())
-    #print(process_line("The inspection yielded no problems.").split())
-    #print(process_line("We'll return it").split())
-    #print(process_line("My father's...").split())
-
 
     print("Done")
 

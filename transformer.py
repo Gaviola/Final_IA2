@@ -185,36 +185,3 @@ class Transformer(nn.Module):
         enc_output = self.encoder(src, src_mask)
         dec_output = self.decoder(tgt, enc_output, src_mask, tgt_mask)
         return self.fc_out(dec_output)
-
-
-def create_padding_mask(seq, pad_idx=0):
-    return (seq == pad_idx).unsqueeze(1).unsqueeze(2)
-
-
-def create_look_ahead_mask(size):
-    return torch.triu(torch.ones(size, size), diagonal=1).bool()
-
-
-
-# Ejemplo de uso
-if __name__ == "__main__":
-    src_vocab_size = 10000
-    tgt_vocab_size = 10000
-    d_model = 512
-    num_layers = 6
-    num_heads = 8
-    d_ff = 2048
-    max_len = 100
-
-    transformer = Transformer(src_vocab_size, tgt_vocab_size, d_model, num_layers, num_heads, d_ff, max_len)
-
-    src = torch.randint(0, src_vocab_size, (32, 20))  # batch_size=32, seq_len=20
-    tgt = torch.randint(0, tgt_vocab_size, (32, 25))  # batch_size=32, seq_len=25
-
-    src_mask = create_padding_mask(src)
-    look_ahead_mask = create_look_ahead_mask(tgt.size(1))
-    tgt_padding_mask = create_padding_mask(tgt)
-    tgt_mask = look_ahead_mask.to(src.device) | tgt_padding_mask
-
-    output = transformer(src, tgt, src_mask, tgt_mask)
-    print(output.shape)  # torch.Size([32, 25, 10000])
