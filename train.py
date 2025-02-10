@@ -121,9 +121,9 @@ def translate(sentence: str,
 
 if __name__ == "__main__":
 
-    mini = False
+    mini = True
     vocab_size = 120000
-    dataset_size = 200000
+    dataset_size = 600000
 
     if mini:
         # Configuración mini
@@ -248,10 +248,10 @@ if __name__ == "__main__":
             print(f"Original: {ex}\n")
             print(f"Traducción: {translation}\n")
 
-        if mini:
-            torch.save(model.state_dict(), f'models/best_model_mini_epoch{epoch + 1}_{vocab_size}_{dataset_size}.pt')
-        else:
-            torch.save(model.state_dict(), f'models/best_model_epoch{epoch + 1}_{vocab_size}_{dataset_size}.pt')
+    if mini:
+        torch.save(model.state_dict(), f'models/model_mini_{NUM_EPOCHS}_{vocab_size}_{dataset_size}.pt')
+    else:
+        torch.save(model.state_dict(), f'models/model_{NUM_EPOCHS}_{vocab_size}_{dataset_size}.pt')
 
     # Ejemplo de traducción
     test_sentence = "The training is finished, let's test the model"

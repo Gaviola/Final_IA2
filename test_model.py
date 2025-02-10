@@ -1,6 +1,11 @@
 import torch
-from train import Vocabulary, process_line, translate
+from data_proccess import process_line
+from train import Vocabulary, translate
 from transformer import Transformer
+import numpy as np
+from nltk.translate.bleu_score import corpus_bleu, SmoothingFunction
+from rouge_score import rouge_scorer
+from tqdm import tqdm
 
 
 def load_model(model_path: str, config: dict, device: torch.device) -> Transformer:
@@ -32,6 +37,75 @@ def load_model(model_path: str, config: dict, device: torch.device) -> Transform
     return model
 
 
+def evaluate_model(model: torch.nn.Module,
+                   src_vocab: Vocabulary,
+                   tgt_vocab: Vocabulary,
+                   test_file: str,
+                   device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
+                   max_samples: int = None,
+                   max_length: int = 100) -> dict:
+    """
+    Evalúa un modelo de traducción usando las métricas BLEU y ROUGE.
+
+    Args:
+        model: Modelo de Transformer entrenado
+        src_vocab: Vocabulario del lenguaje fuente
+        tgt_vocab: Vocabulario del lenguaje objetivo
+        test_file: Ruta al archivo de prueba (formato 'source | target')
+        device: Dispositivo para ejecución
+        max_samples: Número máximo de muestras a evaluar (None para todas)
+        max_length: Longitud máxima de las secuencias
+
+    Returns:
+        Diccionario con puntuaciones BLEU y ROUGE
+    """
+    # Cargar datos de prueba
+    references = []
+    hypotheses = []
+
+    with open(test_file, 'r', encoding='utf-8') as f:
+        lines = f.readlines()[:max_samples] if max_samples else f.readlines()
+
+        for line in tqdm(lines, desc="Procesando muestras"):
+            parts = line.strip().split('|')
+            if len(parts) == 2:
+                src = process_line(parts[0].strip())
+                ref = process_line(parts[1].strip()).split()
+
+                # Generar traducción
+                translation = translate(src, model, src_vocab, tgt_vocab,
+                                        max_length=max_length, device=device)
+
+                references.append([ref])
+                hypotheses.append(translation.split())
+
+    # Calcular BLEU
+    smoothie = SmoothingFunction().method4
+    bleu_score = corpus_bleu(
+        references,
+        hypotheses,
+        smoothing_function=smoothie,
+        weights=(0.25, 0.25, 0.25, 0.25)
+    )
+
+    # Calcular ROUGE
+    scorer = rouge_scorer.RougeScorer(['rouge1', 'rouge2', 'rougeL'], use_stemmer=True)
+    rouge_scores = {'rouge1': [], 'rouge2': [], 'rougeL': [] }
+
+    for ref, hyp in tqdm(zip(references, hypotheses), desc="Calculando ROUGE"):
+        scores = scorer.score(' '.join(ref[0]), ' '.join(hyp))
+        for key in rouge_scores:
+            rouge_scores[key].append(scores[key].fmeasure)
+
+    # Promediar puntuaciones
+    return {
+        'bleu': bleu_score,
+        'rouge1': np.mean(rouge_scores['rouge1']),
+        'rouge2': np.mean(rouge_scores['rouge2']),
+        'rougeL': np.mean(rouge_scores['rougeL'])
+    }
+
+
 if __name__ == "__main__":
     # Configuración (debe coincidir con el entrenamiento)
 
@@ -61,7 +135,8 @@ if __name__ == "__main__":
         }
 
     # Parámetros de prueba
-    MODEL_PATH = 'models/best_model_mini_epoch7.pt'
+    MODEL_PATH = 'models/model_mini_epoch5_120000_400000.pt'
+    test_file = 'data/en-es.txt/dataset_600000.txt'
     SRC_VOCAB_FILE = 'data/vocab_en_120000.txt'
     TGT_VOCAB_FILE = 'data/vocab_es_120000.txt'
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -86,6 +161,22 @@ if __name__ == "__main__":
         print(f"Original: {ex}\n")
         print(f"Traducción: {translation}\n")
         print("-" * 100)
+
+    # Evaluar modelo con las primeras 1000 muestras con las metricas BLEU y ROUGE
+    scores = evaluate_model(
+        model,
+        src_vocab,
+        tgt_vocab,
+        test_file,
+        device=DEVICE.type,
+        max_samples=1000,
+    )
+
+    print("\nResultados de evaluación:")
+    print(f"BLEU: {scores['bleu']:.4f}")
+    print(f"ROUGE-1: {scores['rouge1']:.4f}")
+    print(f"ROUGE-2: {scores['rouge2']:.4f}")
+    print(f"ROUGE-L: {scores['rougeL']:.4f}")
 
     # Bucle interactivo
     print("Traductor Inglés-Español (escribe 'exit' para salir)")
