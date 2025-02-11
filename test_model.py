@@ -31,7 +31,7 @@ def load_model(model_path: str, config: dict, device: torch.device) -> Transform
         dropout=config['dropout']
     ).to(device)
 
-    state_dict = torch.load(model_path, map_location=device)
+    state_dict = torch.load(model_path, map_location=device, weights_only=True)
     model.load_state_dict(state_dict)
     model.eval()
     return model
@@ -61,7 +61,7 @@ def evaluate_model(model: torch.nn.Module,
     """
     # Cargar datos de prueba
     references = []
-    hypotheses = []
+    genereted = []
 
     with open(test_file, 'r', encoding='utf-8') as f:
         lines = f.readlines()[:max_samples] if max_samples else f.readlines()
@@ -76,24 +76,30 @@ def evaluate_model(model: torch.nn.Module,
                 translation = translate(src, model, src_vocab, tgt_vocab,
                                         max_length=max_length, device=device)
 
-                references.append([ref])
-                hypotheses.append(translation.split())
+                references.append([ref]) # Referencias para BLEU en formato de lista de listas
+                genereted.append(translation.split())
 
     # Calcular BLEU
     smoothie = SmoothingFunction().method4
     bleu_score = corpus_bleu(
         references,
-        hypotheses,
+        genereted,
         smoothing_function=smoothie,
-        weights=(0.25, 0.25, 0.25, 0.25)
+        weights=(0.25, 0.25, 0.25, 0.25) # Todos los n-gramas tienen el mismo peso
     )
 
     # Calcular ROUGE
-    scorer = rouge_scorer.RougeScorer(['rouge1', 'rouge2', 'rougeL'], use_stemmer=True)
-    rouge_scores = {'rouge1': [], 'rouge2': [], 'rougeL': [] }
+    scorer = rouge_scorer.RougeScorer(
+        ['rouge1', 'rouge2', 'rouge3', 'rouge4', 'rougeL'],
+        use_stemmer=True
+    )
+    rouge_scores = {
+        'rouge1': [], 'rouge2': [], 'rouge3': [],
+        'rouge4': [], 'rougeL': []
+    }
 
-    for ref, hyp in tqdm(zip(references, hypotheses), desc="Calculando ROUGE"):
-        scores = scorer.score(' '.join(ref[0]), ' '.join(hyp))
+    for ref, gen in tqdm(zip(references, genereted), desc="Calculando ROUGE"):
+        scores = scorer.score(' '.join(ref[0]), ' '.join(gen))
         for key in rouge_scores:
             rouge_scores[key].append(scores[key].fmeasure)
 
@@ -102,6 +108,8 @@ def evaluate_model(model: torch.nn.Module,
         'bleu': bleu_score,
         'rouge1': np.mean(rouge_scores['rouge1']),
         'rouge2': np.mean(rouge_scores['rouge2']),
+        'rouge3': np.mean(rouge_scores['rouge3']),
+        'rouge4': np.mean(rouge_scores['rouge4']),
         'rougeL': np.mean(rouge_scores['rougeL'])
     }
 
@@ -110,6 +118,8 @@ if __name__ == "__main__":
     # Configuración (debe coincidir con el entrenamiento)
 
     mini = True
+    num_sentences = 200000
+    num_samples = 5000
 
     if mini:
         CONFIG = {
@@ -135,8 +145,11 @@ if __name__ == "__main__":
         }
 
     # Parámetros de prueba
-    MODEL_PATH = 'models/model_mini_epoch5_120000_400000.pt'
-    test_file = 'data/en-es.txt/dataset_600000.txt'
+    MODEL_PATH = f'models/vocab_120000/model_mini_epoch5_120000_{num_sentences}.pt'
+    test_files = [
+        'data/en-es.txt/dataset_200000.txt',
+        'data/subs/dataset_200000.txt'
+    ]
     SRC_VOCAB_FILE = 'data/vocab_en_120000.txt'
     TGT_VOCAB_FILE = 'data/vocab_es_120000.txt'
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -162,21 +175,25 @@ if __name__ == "__main__":
         print(f"Traducción: {translation}\n")
         print("-" * 100)
 
-    # Evaluar modelo con las primeras 1000 muestras con las metricas BLEU y ROUGE
-    scores = evaluate_model(
-        model,
-        src_vocab,
-        tgt_vocab,
-        test_file,
-        device=DEVICE.type,
-        max_samples=1000,
-    )
+    # Evaluar modelo con las primeras 1000 muestras de ambos datasets con las metricas BLEU y ROUGE
+    for test_file in test_files:
+        print(f"\nEvaluando con dataset: {test_file}")
+        scores = evaluate_model(
+            model,
+            src_vocab,
+            tgt_vocab,
+            test_file,
+            device=DEVICE.type,
+            max_samples=num_samples,
+        )
 
-    print("\nResultados de evaluación:")
-    print(f"BLEU: {scores['bleu']:.4f}")
-    print(f"ROUGE-1: {scores['rouge1']:.4f}")
-    print(f"ROUGE-2: {scores['rouge2']:.4f}")
-    print(f"ROUGE-L: {scores['rougeL']:.4f}")
+        print("\nResultados de evaluación:")
+        print(f"BLEU: {scores['bleu']:.4f}")
+        print(f"ROUGE-1: {scores['rouge1']:.4f}")
+        print(f"ROUGE-2: {scores['rouge2']:.4f}")
+        print(f"ROUGE-3: {scores['rouge3']:.4f}")
+        print(f"ROUGE-4: {scores['rouge4']:.4f}")
+        print(f"ROUGE-L: {scores['rougeL']:.4f}")
 
     # Bucle interactivo
     print("Traductor Inglés-Español (escribe 'exit' para salir)")
